@@ -1,0 +1,6 @@
+
+BasedOnStyle: Mozilla
+BreakBeforeBraces: Attach
+IndentWidth: 4
+ShortBlockStyle: Never
+ShortFunctionStyle: None
