@@ -1,4 +1,4 @@
-﻿
+
 
 #include "RelearningCpp.h"
 
@@ -66,6 +66,8 @@ class VectorStorage {
   public:
     class Iterator {
       public:
+        Iterator(): storage(nullptr), index(-1){}
+
         Iterator(const VectorStorage* _storage, usize _index)
           : storage(_storage)
           , index(_index) {}
@@ -231,6 +233,49 @@ std::array<TypeInfo, sizeof...(Ts)> get_types()
     return { TypeInfo::create<Ts>()... };
 }
 
+
+template<typename Callable, typename Iter, typename FirstArgType, typename... RestTypes>
+struct DispatchWrapper;
+
+template<typename Callable, typename Iter, typename FirstArgType, typename... RestTypes>
+struct DispatchWrapper {
+    template<typename... CollectedTypes>
+    static void dispatch(Callable c, Iter i, CollectedTypes... collected) {
+        std::cout << typeid(FirstArgType).hash_code() << "\n";
+
+        VectorStorage::Iterator inner_iter = *i;
+        FirstArgType& arg = *((FirstArgType*)(*inner_iter));
+        inner_iter.operator++();
+        DispatchWrapper<Callable, Iter, RestTypes...>::dispatch(c, ++i, arg, collected...);
+    }
+};
+
+
+template<typename Callable, typename Iter, typename FirstArgType>
+struct DispatchWrapper<Callable, Iter, FirstArgType> {
+    template<typename... CollectedTypes>
+    static void dispatch(Callable c, Iter i, CollectedTypes... collected) {
+        VectorStorage::Iterator inner_iter = *i;
+        FirstArgType& arg = *((FirstArgType*)(*inner_iter));
+        inner_iter.operator++();
+        std::cout << "hello twice";
+        c(collected..., arg);
+    }
+};
+
+
+/*
+template<typename Callable, typename Iter, typename Arg,  typename... Ts, typename... Collected>
+void dispatch(Callable c, Iter i, Collected... collected) {
+    dispatch<Ts...>(c, *((Arg)(*i)), ++i);
+}
+
+template<typename Callable, typename Iter, typename... Collected>
+void dispatch<Callable, Iter, void, void, Collected...>(Callable c, Iter i, Collected... collected) {
+    c(collected...);
+}
+*/
+
 class World {
     std::vector<EntityFormation> formations;
 
@@ -339,31 +384,56 @@ class World {
     template<class... CompTypes>
     void with_comps(void (*cb)(CompTypes...)) {
         auto types = get_types<CompTypes...>();
+        std::sort(types.begin(), types.end());
 
         for (auto& t : types) {
             std::cout << t.id << "\n";
         }
 
-        cb(Transform{}, Ball{ 5.0 });
+        for (auto& f: formations) {
+            auto& f_types = f.get_types();
+            auto f_iter = f_types.begin();
+            auto t_iter = types.begin();
+            auto f_index = 0;
+            auto t_index = 0;
+
+            std::array<VectorStorage::Iterator, sizeof...(CompTypes)> storage_pointers = {};
+
+            while (f_iter != f_types.end()) {    
+                if (*f_iter == *t_iter) {
+                    storage_pointers[t_index] = f.get_components()[f_index].begin();
+
+                    t_iter++;
+                    t_index++;
+
+                    if (t_iter == types.end()) {
+                        DispatchWrapper<decltype(cb), decltype(storage_pointers.begin()), CompTypes...>::dispatch(cb, storage_pointers.begin());
+                        goto next;
+                    }
+                }
+
+                f_iter++;
+                f_index++;
+            }
+            next:
+                continue;
+        }
     }
 };
 
-int
-main() {
+int main() {
     auto world = World::empty();
 
     for (int i = 0; i < 200; i++) {
         auto entity = world.create_entity();
 
-        entity =
-          world.add_component(entity, Transform{ Vector3{ 1.0, 5.0, 3.0 } });
+        entity = world.add_component(entity, Transform{ Vector3{ 1.0, 5.0, 3.0 } });
         entity = world.add_component(entity, Ball{ (float)i });
     }
 
     for (int i = 0; i < 50; i++) {
         auto entity = world.create_entity();
-        entity =
-          world.add_component(entity, Transform{ Vector3{ 1.0, 2.0, 4.0 } });
+        entity = world.add_component(entity, Transform{ Vector3{ 1.0, 2.0, 4.0 } });
     }
 
     for (int i = 0; i < 50; i++) {
@@ -372,7 +442,11 @@ main() {
     }
 
     world.with_comps<Transform, Ball>(
-      +[](Transform transform, Ball ball) { std::cout << ball.radius; });
+      +[](Transform transform, Ball ball) { 
+          std::cout << "Hello world?";
+          std::cout << ball.radius; });
+
+    std::cout << std::flush;
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
